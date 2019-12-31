@@ -10,9 +10,11 @@
 using grpc::Channel;
 using grpc::ClientContext;
 using grpc::ClientReader;
+using grpc::ClientWriter;
 using grpc::Status;
 using grpcchat::GrpcChat;
 using grpcchat::Msg;
+
 
 class ChatClient{
 public:
@@ -42,10 +44,35 @@ public:
         }
     }
 
-    void yellingEcho()
+protected:
+    std::unique_ptr<GrpcChat::Stub> stub;
+};
+
+class YellChatClient : public ChatClient{
+public:
+    YellChatClient(std::shared_ptr<Channel> channel): ChatClient(channel), writer(stub->yellingEcho(&context,&response)){}
+
+    bool yelling(const std::string &input){
+        Msg request;
+        request.set_content(input);
+        if(!writer->Write(request))
+            return false; //broken stream
+    }
+
+    void finishYelling(){
+        writer->WritesDone();
+        Status status = writer->Finish();
+        if(status.ok()){
+            std::cout << "Server reply: " << response.content() << std::endl;
+        }else {
+            std::cout << "yellingEcho rpc failed." << std::endl;
+        }
+    }
 
 private:
-    std::unique_ptr<GrpcChat::Stub> stub;
+    ClientContext context;
+    Msg response;
+    std::unique_ptr<ClientWriter<Msg> > writer;
 };
 
 int main(int argc, char *argv[]){
@@ -64,17 +91,37 @@ int main(int argc, char *argv[]){
 
     char buffer[1024];
     switch(choice){
-        case 1:
+        case 1: //yell()
             while(true){
                 std::cout <<"Enter message: "<<std::endl;
                 std::cin.getline(buffer,sizeof(buffer));
                 client.yell(buffer);
             }
-        case 2:
+        case 2: //yellEchoing()
             while(true){
                 std::cout <<"Enter message: "<<std::endl;
                 std::cin.getline(buffer,sizeof(buffer));
                 client.yellEchoing(buffer);
+            }
+        case 3: //yellingEcho()
+            while(true){
+                //create new ClientContext and ClientWriter after user input 'q'
+                YellChatClient yell_client(grpc::CreateChannel(argv[1], grpc::InsecureChannelCredentials()));
+                while(true){
+                    std::cout <<"Enter messages, type 'q' to end: "<<std::endl;
+                    std::cin.getline(buffer,sizeof(buffer));
+                    if(std::strcmp(buffer,"q") == 0){
+                        yell_client.finishYelling();
+                        break;
+                    }else{
+                        yell_client.yelling(buffer);
+                    }
+                }
+
+            }
+        case 4: //yellingEchoing()
+            while(true){
+
             }
     }
 
