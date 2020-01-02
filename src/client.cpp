@@ -2,6 +2,7 @@
 // Created by zhihui on 12/31/19.
 //
 
+#include <thread>
 #include <grpcpp/channel.h>
 #include <grpcpp/create_channel.h>
 #include <grpcpp/security/credentials.h>
@@ -11,6 +12,7 @@ using grpc::Channel;
 using grpc::ClientContext;
 using grpc::ClientReader;
 using grpc::ClientWriter;
+using grpc::ClientReaderWriter;
 using grpc::Status;
 using grpcchat::GrpcChat;
 using grpcchat::Msg;
@@ -75,6 +77,42 @@ private:
     std::unique_ptr<ClientWriter<Msg> > writer;
 };
 
+class YellStreamEchoStreamClient : public ChatClient{
+public:
+    YellStreamEchoStreamClient(std::shared_ptr<Channel> channel): ChatClient(channel),stream(stub->yellingEchoing(&context)){}
+
+    void yelling(const std::string &input){
+        Msg request;
+        request.set_content(input);
+        stream->Write(request);
+    }
+
+    void finishYelling(){
+        stream->WritesDone();
+    }
+
+    void recvEchoing(){
+        Msg response;
+        while(stream->Read(&response)){
+            std::cout << "Server reply: " << response.content() <<std::endl;
+        }
+    }
+
+    void checkStatus(){
+        Status status = stream->Finish();
+        if (status.ok()) {
+            std::cout << "yellingEchoing rpc succeeded." << std::endl;
+        } else {
+            std::cout << "yellingEchoing rpc failed." << std::endl;
+        }
+    }
+
+private:
+    ClientContext context;
+    std::unique_ptr<ClientReaderWriter<Msg,Msg>> stream;
+};
+
+
 int main(int argc, char *argv[]){
 
     if(argc != 2){
@@ -105,7 +143,7 @@ int main(int argc, char *argv[]){
             }
         case 3: //yellingEcho()
             while(true){
-                //create new ClientContext and ClientWriter after user input 'q'
+                //create new ClientContext and ClientWriter
                 YellChatClient yell_client(grpc::CreateChannel(argv[1], grpc::InsecureChannelCredentials()));
                 while(true){
                     std::cout <<"Enter messages, type 'q' to end: "<<std::endl;
@@ -121,6 +159,28 @@ int main(int argc, char *argv[]){
             }
         case 4: //yellingEchoing()
             while(true){
+                //create new ClientContext and a ClientReaderWriter, read and write cooperate separately
+                YellStreamEchoStreamClient stream_client(grpc::CreateChannel(argv[1],grpc::InsecureChannelCredentials()));
+
+                //start new thread to "yell" user input to server
+                std::thread writer([&stream_client, &buffer](){
+                    while(true){
+                        std::cout<<"Enter messages, type 'q' to end: "<<std::endl;
+                        std::cin.getline(buffer, sizeof(buffer));
+                        if(std::strcmp(buffer,"q") == 0){
+                            stream_client.finishYelling();
+                            break;
+                        }else{
+                            stream_client.yelling(buffer);
+                        }
+                    }
+                });
+
+                //receive "echo" from server
+                stream_client.recvEchoing();
+
+                writer.join();
+                stream_client.checkStatus();
 
             }
     }
